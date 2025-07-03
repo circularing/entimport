@@ -15,11 +15,13 @@ import (
 var (
 	tablesFlag        tables
 	excludeTablesFlag tables
+	ignoreMissingPK   bool
 )
 
 func init() {
 	flag.Var(&tablesFlag, "tables", "comma-separated list of tables to inspect (all if empty)")
 	flag.Var(&excludeTablesFlag, "exclude-tables", "comma-separated list of tables to exclude")
+	flag.BoolVar(&ignoreMissingPK, "ignore-missing-pk", false, "ignore missing primary keys and use foreign keys as fallback")
 }
 
 func main() {
@@ -43,6 +45,7 @@ func main() {
 		entimport.WithTables(tablesFlag),
 		entimport.WithExcludedTables(excludeTablesFlag),
 		entimport.WithDriver(drv),
+		entimport.WithIgnoreMissingPrimaryKey(ignoreMissingPK),
 	)
 	if err != nil {
 		log.Fatalf("entimport: create importer failed: %v", err)

@@ -51,7 +51,7 @@ func (p *Postgres) SchemaMutations(ctx context.Context) ([]schemast.Mutator, err
 			}
 		}
 	}
-	return schemaMutations(p.field, tables)
+	return schemaMutations(p.field, tables, p.ignoreMissingPK)
 }
 
 func (p *Postgres) field(column *schema.Column) (f ent.Field, err error) {

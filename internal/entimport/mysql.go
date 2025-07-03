@@ -56,7 +56,7 @@ func (m *MySQL) SchemaMutations(ctx context.Context) ([]schemast.Mutator, error)
 			}
 		}
 	}
-	return schemaMutations(m.field, tables)
+	return schemaMutations(m.field, tables, m.ignoreMissingPK)
 }
 
 func (m *MySQL) field(column *schema.Column) (f ent.Field, err error) {

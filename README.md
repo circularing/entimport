@@ -90,6 +90,8 @@ Usage of ./entimport:
         output path for ent schema (default "./ent/schema")
   -tables value
         comma-separated list of tables to inspect (all if empty)
+  -ignore-missing-pk
+        ignore missing primary key and use foreign keys as fallback
 ```
 
 ## Examples:

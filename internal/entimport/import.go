@@ -48,10 +48,11 @@ type (
 
 	// ImportOptions are the options passed on to every SchemaImporter.
 	ImportOptions struct {
-		tables         []string
-		excludedTables []string
-		schemaPath     string
-		driver         *mux.ImportDriver
+		tables          []string
+		excludedTables  []string
+		schemaPath      string
+		driver          *mux.ImportDriver
+		ignoreMissingPK bool
 	}
 
 	// ImportOption allows for managing import configuration using functional options.
@@ -83,6 +84,13 @@ func WithExcludedTables(tables []string) ImportOption {
 func WithDriver(drv *mux.ImportDriver) ImportOption {
 	return func(i *ImportOptions) {
 		i.driver = drv
+	}
+}
+
+// WithIgnoreMissingPrimaryKey provides an option to ignore missing primary keys.
+func WithIgnoreMissingPrimaryKey(ignore bool) ImportOption {
+	return func(i *ImportOptions) {
+		i.ignoreMissingPK = ignore
 	}
 }
 
@@ -241,8 +249,24 @@ func tableName(typeName string) string {
 }
 
 // resolvePrimaryKey returns the primary key as an ent field for a given table.
-func resolvePrimaryKey(field fieldFunc, table *schema.Table) (f ent.Field, err error) {
+func resolvePrimaryKey(field fieldFunc, table *schema.Table, ignoreMissingPK bool) (f ent.Field, err error) {
 	if table.PrimaryKey == nil {
+		if ignoreMissingPK {
+			// If we're ignoring missing primary keys, try to use the first foreign key column as a fallback
+			if len(table.ForeignKeys) > 0 && len(table.ForeignKeys[0].Columns) > 0 {
+				// Use the first foreign key column as a synthetic primary key
+				if f, err = field(table.ForeignKeys[0].Columns[0]); err != nil {
+					return nil, err
+				}
+				if d := f.Descriptor(); d.Name != "id" {
+					d.StorageKey = d.Name
+					d.Name = "id"
+				}
+				return f, nil
+			}
+			// If no foreign keys either, return nil to indicate no primary key
+			return nil, nil
+		}
 		return nil, fmt.Errorf("entimport: missing primary key (table: %v)", table.Name)
 	}
 	if len(table.PrimaryKey.Parts) != 1 {
@@ -251,6 +275,7 @@ func resolvePrimaryKey(field fieldFunc, table *schema.Table) (f ent.Field, err e
 	if f, err = field(table.PrimaryKey.Parts[0].C); err != nil {
 		return nil, err
 	}
+
 	if d := f.Descriptor(); d.Name != "id" {
 		d.StorageKey = d.Name
 		d.Name = "id"
@@ -259,7 +284,7 @@ func resolvePrimaryKey(field fieldFunc, table *schema.Table) (f ent.Field, err e
 }
 
 // upsertNode handles the creation of a node from a given table.
-func upsertNode(field fieldFunc, table *schema.Table) (*schemast.UpsertSchema, error) {
+func upsertNode(field fieldFunc, table *schema.Table, ignoreMissingPK bool) (*schemast.UpsertSchema, error) {
 	upsert := &schemast.UpsertSchema{
 		Name: typeName(table.Name),
 	}
@@ -272,13 +297,16 @@ func upsertNode(field fieldFunc, table *schema.Table) (*schemast.UpsertSchema, e
 	for _, f := range upsert.Fields {
 		fields[f.Descriptor().StorageKey] = f
 	}
-	pk, err := resolvePrimaryKey(field, table)
+	pk, err := resolvePrimaryKey(field, table, ignoreMissingPK)
 	if err != nil {
 		return nil, err
 	}
-	if _, ok := fields[pk.Descriptor().StorageKey]; !ok {
-		fields[pk.Descriptor().StorageKey] = pk
-		upsert.Fields = append(upsert.Fields, pk)
+	if pk != nil {
+		if _, ok := fields[pk.Descriptor().StorageKey]; !ok {
+			fields[pk.Descriptor().StorageKey] = pk
+			upsert.Fields = append(upsert.Fields, pk)
+		}
+
 	}
 	for _, column := range table.Columns {
 		if table.PrimaryKey != nil &&
@@ -325,7 +353,7 @@ func applyColumnAttributes(f ent.Field, col *schema.Column) {
 }
 
 // schemaMutations is in charge of creating all the schema mutations needed for an ent schema.
-func schemaMutations(field fieldFunc, tables []*schema.Table) ([]schemast.Mutator, error) {
+func schemaMutations(field fieldFunc, tables []*schema.Table, ignoreMissingPK bool) ([]schemast.Mutator, error) {
 	mutations := make(map[string]schemast.Mutator)
 	joinTables := make(map[string]*schema.Table)
 	for _, table := range tables {
@@ -333,7 +361,7 @@ func schemaMutations(field fieldFunc, tables []*schema.Table) ([]schemast.Mutato
 			joinTables[table.Name] = table
 			continue
 		}
-		node, err := upsertNode(field, table)
+		node, err := upsertNode(field, table, ignoreMissingPK)
 		if err != nil {
 			return nil, fmt.Errorf("entimport: issue with table %v: %w", table.Name, err)
 		}
