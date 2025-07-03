@@ -1,4 +1,4 @@
-module ariga.io/entimport
+module github.com/MeowSH/entimport
 
 go 1.20
 
@@ -21,11 +21,9 @@ require (
 	github.com/google/go-cmp v0.5.6 // indirect
 	github.com/hashicorp/hcl/v2 v2.10.0 // indirect
 	github.com/jhump/protoreflect v1.10.1 // indirect
-	github.com/kr/text v0.2.0 // indirect
 	github.com/mitchellh/go-wordwrap v0.0.0-20150314170334-ad45545899c7 // indirect
 	github.com/mitchellh/mapstructure v1.4.3 // indirect
 	github.com/pmezard/go-difflib v1.0.0 // indirect
-	github.com/sergi/go-diff v1.1.0 // indirect
 	github.com/stretchr/objx v0.3.0 // indirect
 	github.com/zclconf/go-cty v1.8.0 // indirect
 	go.uber.org/atomic v1.7.0 // indirect

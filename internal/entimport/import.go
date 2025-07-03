@@ -6,7 +6,7 @@ import (
 	"fmt"
 
 	"ariga.io/atlas/sql/schema"
-	"ariga.io/entimport/internal/mux"
+	"github.com/MeowSH/entimport/internal/mux"
 
 	"entgo.io/contrib/schemast"
 	"entgo.io/ent"

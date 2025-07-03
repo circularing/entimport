@@ -8,8 +8,8 @@ import (
 	"os"
 	"strings"
 
-	"ariga.io/entimport/internal/entimport"
-	"ariga.io/entimport/internal/mux"
+	"github.com/MeowSH/entimport/internal/entimport"
+	"github.com/MeowSH/entimport/internal/mux"
 )
 
 var (
