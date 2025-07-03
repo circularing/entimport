@@ -13,8 +13,8 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/MeowSH/entimport/internal/entimport"
-	"github.com/MeowSH/entimport/internal/mux"
+	"github.com/circularing/entimport/internal/entimport"
+	"github.com/circularing/entimport/internal/mux"
 
 	"entgo.io/ent/dialect"
 	"github.com/go-openapi/inflect"

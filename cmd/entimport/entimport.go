@@ -8,8 +8,8 @@ import (
 	"os"
 	"strings"
 
-	"github.com/MeowSH/entimport/internal/entimport"
-	"github.com/MeowSH/entimport/internal/mux"
+	"github.com/circularing/entimport/internal/entimport"
+	"github.com/circularing/entimport/internal/mux"
 )
 
 var (

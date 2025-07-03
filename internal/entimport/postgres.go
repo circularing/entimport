@@ -56,6 +56,7 @@ func (p *Postgres) SchemaMutations(ctx context.Context) ([]schemast.Mutator, err
 
 func (p *Postgres) field(column *schema.Column) (f ent.Field, err error) {
 	name := column.Name
+
 	switch typ := column.Type.Type.(type) {
 	case *schema.BinaryType:
 		f = field.Bytes(name)
@@ -79,6 +80,10 @@ func (p *Postgres) field(column *schema.Column) (f ent.Field, err error) {
 		f = p.convertSerial(typ, name)
 	case *postgres.UUIDType:
 		f = field.UUID(name, uuid.New())
+	case *postgres.ArrayType:
+		f = p.convertArray(typ, name, column)
+		// Don't call applyColumnAttributes for array types since we handle optional directly
+		return f, nil
 	default:
 		return nil, fmt.Errorf("entimport: unsupported type %q for column %v", typ, column.Name)
 	}
@@ -121,4 +126,12 @@ func (p *Postgres) convertSerial(typ *postgres.SerialType, name string) ent.Fiel
 		SchemaType(map[string]string{
 			dialect.Postgres: typ.T, // Override Postgres.
 		})
+}
+
+func (p *Postgres) convertArray(typ *postgres.ArrayType, name string, column *schema.Column) ent.Field {
+	f := field.JSON(name, []string{})
+	if column.Type.Null {
+		return f.Optional()
+	}
+	return f
 }
