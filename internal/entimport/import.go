@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 
 	"ariga.io/atlas/sql/schema"
 	"github.com/circularing/entimport/internal/mux"
@@ -248,6 +249,36 @@ func tableName(typeName string) string {
 	return inflect.Underscore(inflect.Pluralize(typeName))
 }
 
+// resolveCompositePrimaryKey handles tables with composite primary keys
+// by creating fields for all primary key parts and preserving the structure
+func resolveCompositePrimaryKey(field fieldFunc, table *schema.Table) ([]ent.Field, error) {
+	if table.PrimaryKey == nil || len(table.PrimaryKey.Parts) <= 1 {
+		return nil, fmt.Errorf("entimport: not a composite primary key (table: %v)", table.Name)
+	}
+
+	var pkFields []ent.Field
+	for i, part := range table.PrimaryKey.Parts {
+		f, err := field(part.C)
+		if err != nil {
+			return nil, err
+		}
+
+		// For composite PKs, we keep the original field names and don't rename to "id"
+		// This preserves the exact database structure
+		if i == 0 {
+			// First part gets special handling - keep original name but mark as primary
+			if d := f.Descriptor(); d.Name != "id" {
+				d.StorageKey = d.Name
+				// Don't rename to "id" for composite keys to preserve structure
+			}
+		}
+
+		pkFields = append(pkFields, f)
+	}
+
+	return pkFields, nil
+}
+
 // resolvePrimaryKey returns the primary key as an ent field for a given table.
 func resolvePrimaryKey(field fieldFunc, table *schema.Table, ignoreMissingPK bool) (f ent.Field, err error) {
 	if table.PrimaryKey == nil {
@@ -269,9 +300,18 @@ func resolvePrimaryKey(field fieldFunc, table *schema.Table, ignoreMissingPK boo
 		}
 		return nil, fmt.Errorf("entimport: missing primary key (table: %v)", table.Name)
 	}
-	if len(table.PrimaryKey.Parts) != 1 {
-		return nil, fmt.Errorf("entimport: invalid primary key, single part key must be present (table: %v, got: %v parts)", table.Name, len(table.PrimaryKey.Parts))
+	if len(table.PrimaryKey.Parts) == 0 {
+		return nil, fmt.Errorf("entimport: invalid primary key, at least one part must be present (table: %v)", table.Name)
 	}
+
+	// Check if this is a composite primary key
+	if len(table.PrimaryKey.Parts) > 1 {
+		// For composite primary keys, we need to handle them differently
+		// This will be handled in upsertNode by calling resolveCompositePrimaryKey
+		return nil, fmt.Errorf("entimport: composite primary key detected (table: %v, parts: %d)", table.Name, len(table.PrimaryKey.Parts))
+	}
+
+	// Single-part primary key - original logic
 	if f, err = field(table.PrimaryKey.Parts[0].C); err != nil {
 		return nil, err
 	}
@@ -297,48 +337,82 @@ func upsertNode(field fieldFunc, table *schema.Table, ignoreMissingPK bool) (*sc
 	for _, f := range upsert.Fields {
 		fields[f.Descriptor().StorageKey] = f
 	}
-	pk, err := resolvePrimaryKey(field, table, ignoreMissingPK)
-	if err != nil {
-		return nil, err
-	}
-	if pk != nil {
-		if _, ok := fields[pk.Descriptor().StorageKey]; !ok {
-			fields[pk.Descriptor().StorageKey] = pk
-			upsert.Fields = append(upsert.Fields, pk)
-		}
 
+	// Check if this is a composite primary key first
+	if table.PrimaryKey != nil && len(table.PrimaryKey.Parts) > 1 {
+		// Handle composite primary key
+		compositePKs, err := resolveCompositePrimaryKey(field, table)
+		if err != nil {
+			return nil, err
+		}
+		// Add all composite primary key fields
+		for _, pkField := range compositePKs {
+			fieldKey := strings.ToLower(pkField.Descriptor().StorageKey)
+			if _, ok := fields[fieldKey]; !ok {
+				fields[fieldKey] = pkField
+				upsert.Fields = append(upsert.Fields, pkField)
+			}
+		}
+	} else {
+		// Try to resolve single-part primary key
+		pk, err := resolvePrimaryKey(field, table, ignoreMissingPK)
+		if err != nil {
+			return nil, err
+		}
+		if pk != nil {
+			// Single-part primary key
+			fieldKey := strings.ToLower(pk.Descriptor().StorageKey)
+			if _, ok := fields[fieldKey]; !ok {
+				fields[fieldKey] = pk
+				upsert.Fields = append(upsert.Fields, pk)
+			}
+		}
 	}
 	for _, column := range table.Columns {
-		if table.PrimaryKey != nil &&
-			len(table.PrimaryKey.Parts) != 0 &&
-			table.PrimaryKey.Parts[0].C.Name == column.Name {
+		// Only skip PK columns if this is NOT a composite PK
+		skip := false
+		if table.PrimaryKey != nil && len(table.PrimaryKey.Parts) == 1 {
+			for _, part := range table.PrimaryKey.Parts {
+				if part.C.Name == column.Name {
+					skip = true
+					break
+				}
+			}
+		}
+		if skip {
 			continue
 		}
 		fld, err := field(column)
 		if err != nil {
 			return nil, err
 		}
-		if _, ok := fields[column.Name]; !ok {
-			fields[column.Name] = fld
+		// Store field with case-insensitive key for lookup
+		fieldKey := strings.ToLower(column.Name)
+		if _, ok := fields[fieldKey]; !ok {
+			fields[fieldKey] = fld
 			upsert.Fields = append(upsert.Fields, fld)
 		}
 	}
 	for _, index := range table.Indexes {
 		if index.Unique && len(index.Parts) == 1 {
-			fields[index.Parts[0].C.Name].Descriptor().Unique = true
+			fieldKey := strings.ToLower(index.Parts[0].C.Name)
+			if fld, ok := fields[fieldKey]; ok {
+				fld.Descriptor().Unique = true
+			}
 		}
 	}
 	for _, fk := range table.ForeignKeys {
 		for _, column := range fk.Columns {
-			// FK / Reference column
-			fld, ok := fields[column.Name]
+			// FK / Reference column - use case-insensitive lookup
+			fieldKey := strings.ToLower(column.Name)
+			fld, ok := fields[fieldKey]
 			if !ok {
 				return nil, fmt.Errorf("foreign key for column: %q doesn't exist in referenced table", column.Name)
 			}
 			fld.Descriptor().Optional = true
 		}
 	}
-	return upsert, err
+	return upsert, nil
 }
 
 // applyColumnAttributes adds column attributes to a given ent field.

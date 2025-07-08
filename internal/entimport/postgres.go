@@ -85,7 +85,21 @@ func (p *Postgres) field(column *schema.Column) (f ent.Field, err error) {
 		// Don't call applyColumnAttributes for array types since we handle optional directly
 		return f, nil
 	default:
-		return nil, fmt.Errorf("entimport: unsupported type %q for column %v", typ, column.Name)
+		// Handle hstore as a user-defined type
+		if udt, ok := typ.(*postgres.UserDefinedType); ok && udt.T == "hstore" {
+			f = field.JSON(name, json.RawMessage{}).
+				SchemaType(map[string]string{
+					dialect.Postgres: "jsonb",
+				})
+		} else if column.Type.Raw == "hstore" {
+			// Map hstore to JSONB
+			f = field.JSON(name, json.RawMessage{}).
+				SchemaType(map[string]string{
+					dialect.Postgres: "jsonb",
+				})
+		} else {
+			return nil, fmt.Errorf("entimport: unsupported type %q for column %v", typ, column.Name)
+		}
 	}
 	applyColumnAttributes(f, column)
 	return f, err
