@@ -121,13 +121,12 @@ func (p *Postgres) convertInteger(typ *schema.IntegerType, name string) (f ent.F
 	// smallint - 2 bytes small-range integer -32768 to +32767.
 	case "smallint":
 		f = field.Int16(name)
-	// integer - 4 bytes typical choice for integer	-2147483648 to +2147483647.
+	// integer - 4 bytes typical choice for integer -2147483648 to +2147483647.
 	case "integer":
-		f = field.Int32(name)
-	// bigint - 8 bytes large-range integer	-9223372036854775808 to 9223372036854775807.
+		f = field.Int(name) // Use Int, not Uint32
+	// bigint - 8 bytes large-range integer -9223372036854775808 to 9223372036854775807.
 	case "bigint":
-		// Int64 is not used on purpose.
-		f = field.Int(name)
+		f = field.Int64(name)
 	}
 	return f
 }
@@ -136,10 +135,28 @@ func (p *Postgres) convertInteger(typ *schema.IntegerType, name string) (f ent.F
 // serial - 4 bytes autoincrementing integer 1 to 2147483647
 // bigserial - 8 bytes large autoincrementing integer	1 to 9223372036854775807
 func (p *Postgres) convertSerial(typ *postgres.SerialType, name string) ent.Field {
-	return field.Uint(name).
-		SchemaType(map[string]string{
-			dialect.Postgres: typ.T, // Override Postgres.
-		})
+	switch typ.T {
+	case "smallserial":
+		return field.Int16(name).
+			SchemaType(map[string]string{
+				dialect.Postgres: typ.T, // Override Postgres.
+			})
+	case "serial":
+		return field.Int(name).
+			SchemaType(map[string]string{
+				dialect.Postgres: typ.T, // Override Postgres.
+			})
+	case "bigserial":
+		return field.Int64(name).
+			SchemaType(map[string]string{
+				dialect.Postgres: typ.T, // Override Postgres.
+			})
+	default:
+		return field.Int(name).
+			SchemaType(map[string]string{
+				dialect.Postgres: typ.T, // Override Postgres.
+			})
+	}
 }
 
 func (p *Postgres) convertArray(typ *postgres.ArrayType, name string, column *schema.Column) ent.Field {
