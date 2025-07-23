@@ -3141,7 +3141,6 @@ func MockPostgresO2OTwoTypes() *schema.Schema {
 		},
 	}
 }
-
 func MockPostgresO2OSameType() *schema.Schema {
 	table := &schema.Table{
 		Name: "nodes",

@@ -1,0 +1,8 @@
+# Schemas test repository
+/ent
+
+# OS files
+.DS_Store
+
+# Cursor files
+.cursor/

@@ -56,11 +56,19 @@ func (m *MySQL) SchemaMutations(ctx context.Context) ([]schemast.Mutator, error)
 			}
 		}
 	}
-	return schemaMutations(m.field, tables, m.ignoreMissingPK)
+	// Create a closure that captures the MySQL receiver
+	fieldFunc := func(column *schema.Column, table *schema.Table) (ent.Field, error) {
+		return m.field(column, table)
+	}
+	return schemaMutations(fieldFunc, tables, m.ignoreMissingPK)
 }
 
-func (m *MySQL) field(column *schema.Column) (f ent.Field, err error) {
+func (m *MySQL) field(column *schema.Column, table *schema.Table) (f ent.Field, err error) {
 	name := column.Name
+	if m != nil && m.ImportOptions != nil && m.camelCase {
+		name = snakeToCamel(column.Name)
+	}
+
 	switch typ := column.Type.Type.(type) {
 	case *schema.BinaryType:
 		f = field.Bytes(name)
@@ -80,10 +88,16 @@ func (m *MySQL) field(column *schema.Column) (f ent.Field, err error) {
 		f = field.String(name)
 	case *schema.TimeType:
 		f = field.Time(name)
+	case *mysql.SetType:
+		f = field.String(name)
 	default:
 		return nil, fmt.Errorf("entimport: unsupported type %q for column %v", typ, column.Name)
 	}
-	applyColumnAttributes(f, column)
+
+	// Add StorageKey to preserve the original database column name
+	f.Descriptor().StorageKey = column.Name
+
+	applyColumnAttributes(f, column, table)
 	return f, err
 }
 

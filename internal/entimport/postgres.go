@@ -51,11 +51,18 @@ func (p *Postgres) SchemaMutations(ctx context.Context) ([]schemast.Mutator, err
 			}
 		}
 	}
-	return schemaMutations(p.field, tables, p.ignoreMissingPK)
+	// Create a closure that captures the Postgres receiver
+	fieldFunc := func(column *schema.Column, table *schema.Table) (ent.Field, error) {
+		return p.field(column, table)
+	}
+	return schemaMutations(fieldFunc, tables, p.ignoreMissingPK)
 }
 
-func (p *Postgres) field(column *schema.Column) (f ent.Field, err error) {
+func (p *Postgres) field(column *schema.Column, table *schema.Table) (f ent.Field, err error) {
 	name := column.Name
+	if p != nil && p.ImportOptions != nil && p.camelCase {
+		name = snakeToCamel(column.Name)
+	}
 
 	switch typ := column.Type.Type.(type) {
 	case *schema.BinaryType:
@@ -101,7 +108,11 @@ func (p *Postgres) field(column *schema.Column) (f ent.Field, err error) {
 			return nil, fmt.Errorf("entimport: unsupported type %q for column %v", typ, column.Name)
 		}
 	}
-	applyColumnAttributes(f, column)
+
+	// Add StorageKey to preserve the original database column name
+	f.Descriptor().StorageKey = column.Name
+
+	applyColumnAttributes(f, column, table)
 	return f, err
 }
 

@@ -16,12 +16,14 @@ var (
 	tablesFlag        tables
 	excludeTablesFlag tables
 	ignoreMissingPK   bool
+	camelCaseFlag     bool
 )
 
 func init() {
 	flag.Var(&tablesFlag, "tables", "comma-separated list of tables to inspect (all if empty)")
 	flag.Var(&excludeTablesFlag, "exclude-tables", "comma-separated list of tables to exclude")
 	flag.BoolVar(&ignoreMissingPK, "ignore-missing-pk", false, "ignore missing primary keys and use foreign keys as fallback")
+	flag.BoolVar(&camelCaseFlag, "camelcase", false, "convert snake_case table and column names to camelCase in generated schema")
 }
 
 func main() {
@@ -46,6 +48,7 @@ func main() {
 		entimport.WithExcludedTables(excludeTablesFlag),
 		entimport.WithDriver(drv),
 		entimport.WithIgnoreMissingPrimaryKey(ignoreMissingPK),
+		entimport.WithCamelCase(camelCaseFlag),
 	)
 	if err != nil {
 		log.Fatalf("entimport: create importer failed: %v", err)
