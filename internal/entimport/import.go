@@ -576,11 +576,6 @@ func upsertRelationWithThroughFrom(nodeA *schemast.UpsertSchema, nodeB *schemast
 	addEdgeIfNotExists(nodeA, e)
 }
 
-// upsertRelationWithThroughSelfRef creates a M2M self-referential relation using Through() method.
-func upsertRelationWithThroughSelfRef(nodeA *schemast.UpsertSchema, nodeB *schemast.UpsertSchema, joinTableNode *schemast.UpsertSchema, opts relOptions) {
-	// Temporarily disabled - see upsertRelationWithThrough for details
-}
-
 // upsertJunctionTableEdges creates edges for junction tables back to parent entities.
 func upsertJunctionTableEdges(mutations map[string]schemast.Mutator, table *schema.Table) error {
 	if len(table.ForeignKeys) != 2 {
@@ -732,13 +727,9 @@ func upsertManyToMany(mutations map[string]schemast.Mutator, table *schema.Table
 		upsertRelationWithThrough(nodeA, nodeB, joinTableNode, opts)
 
 		// Second direction: nodeB -> nodeA (edge.From with Ref)
-		// For self-referential relationships, create the reverse edge
+		// For different tables, create normal bidirectional edge
 		opts.refName = typeName(tableA.Name)
-		if tableA.Name == tableB.Name {
-			// Self-referential - create parent edge
-			upsertRelationWithThroughSelfRef(nodeB, nodeA, joinTableNode, opts)
-		} else {
-			// Different tables - create normal bidirectional edge
+		if tableA.Name != tableB.Name {
 			upsertRelationWithThroughFrom(nodeB, nodeA, joinTableNode, opts)
 		}
 	} else {
@@ -1502,14 +1493,6 @@ func addEdgeIfNotExists(schema *schemast.UpsertSchema, newEdge ent.Edge) {
 	schema.Edges = append(schema.Edges, newEdge)
 }
 
-// postProcessCompositeKeysSelective adds field.ID annotations only to safe junction tables
-func postProcessCompositeKeysSelective(schemaDir string) error {
-	// For now, don't add field.ID annotations to avoid template errors
-	// The .Through() edges are working correctly without them
-	// TODO: Research how to add field.ID annotations without breaking Ent's template system
-	return nil
-}
-
 // postProcessCompositeKeys adds field.ID annotations to junction table schemas with composite primary keys
 func postProcessCompositeKeys(schemaDir string) error {
 	return filepath.WalkDir(schemaDir, func(path string, d fs.DirEntry, err error) error {
@@ -1538,7 +1521,7 @@ func postProcessCompositeKeys(schemaDir string) error {
 		}
 
 		// Only add field.ID annotations to junction tables to avoid template errors
-		if !isJunctionTableSchema(string(content), schemaName) {
+		if !isJunctionTableSchema(string(content), schemaName, schemaDir) {
 			return nil
 		}
 
@@ -1565,24 +1548,96 @@ func hasCompositeKeyFields(content string) bool {
 
 // isJunctionTableSchema checks if a schema represents a junction table that should use field.ID annotation
 // According to Ent documentation, field.ID() should ONLY be used for edge schemas used with .Through()
-func isJunctionTableSchema(content string, schemaName string) bool {
+func isJunctionTableSchema(content string, schemaName string, schemaDir string) bool {
 	// Check if this schema has composite primary key fields
 	if !hasCompositeKeyFields(content) {
 		return false
 	}
 
-	// field.ID() should ONLY be applied to junction tables that are used with .Through() relationships
-	// Based on the actual .Through() usage found in the generated schemas, only these should have field.ID():
-	throughEnabledTables := map[string]bool{
-		"UserCircle":              true, // Used in .Through("usercircles", UserCircle.Type)
-		"UserFlowState":           true, // Used in .Through("userflowstates", UserFlowState.Type)
-		"UserBannerClosed":        true, // Used in .Through("userbannercloseds", UserBannerClosed.Type)
-		"BannerTemplateComponent": true, // Used in .Through("bannertemplatecomponents", BannerTemplateComponent.Type)
+	// Dynamically detect which schemas are used with .Through() relationships
+	// by scanning all schema files in the directory
+	throughEnabledSchemas, err := detectThroughEnabledSchemas(schemaDir)
+	if err != nil {
+		// If we can't detect, fall back to basic heuristics
+		return isLikelyJunctionTableWithThrough(content, schemaName)
 	}
 
 	// Only apply field.ID() to schemas that are actually used with .Through()
 	// All other junction tables should be regular entities without field.ID()
-	return throughEnabledTables[schemaName]
+	return throughEnabledSchemas[schemaName]
+}
+
+// detectThroughEnabledSchemas scans all schema files to find which schemas are used with .Through()
+func detectThroughEnabledSchemas(schemaDir string) (map[string]bool, error) {
+	throughSchemas := make(map[string]bool)
+
+	err := filepath.WalkDir(schemaDir, func(path string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+
+		// Only process .go files
+		if !strings.HasSuffix(path, ".go") || d.IsDir() {
+			return nil
+		}
+
+		// Read the schema file
+		content, err := os.ReadFile(path)
+		if err != nil {
+			return err
+		}
+
+		// Look for .Through() method calls and extract the schema type
+		// Pattern: .Through("tablename", SchemaName.Type)
+		// Also handle variations like .Through("table", schema.Type)
+		throughPattern := regexp.MustCompile(`\.Through\("[^"]+",\s*([A-Za-z_][A-Za-z0-9_]*(?:\.[A-Za-z_][A-Za-z0-9_]*)?)\.[Tt]ype\)`)
+		matches := throughPattern.FindAllStringSubmatch(string(content), -1)
+
+		for _, match := range matches {
+			if len(match) > 1 {
+				schemaName := match[1]
+				// Extract just the schema name if it includes a package prefix
+				// e.g., "schema.UserCircle" -> "UserCircle"
+				if dotIndex := strings.LastIndex(schemaName, "."); dotIndex != -1 {
+					schemaName = schemaName[dotIndex+1:]
+				}
+				throughSchemas[schemaName] = true
+			}
+		}
+
+		return nil
+	})
+
+	return throughSchemas, err
+}
+
+// isLikelyJunctionTableWithThrough provides a fallback heuristic when dynamic detection fails
+func isLikelyJunctionTableWithThrough(content string, schemaName string) bool {
+	// Heuristic 1: Check if it has exactly 2 foreign key fields (typical junction table)
+	// Count fields that look like foreign keys (end with Id and are immutable)
+	fkPattern := regexp.MustCompile(`field\.[^(]+\("([^"]+Id)"\)[^,]*\.Immutable\(\)`)
+	fkMatches := fkPattern.FindAllStringSubmatch(content, -1)
+
+	// Heuristic 2: Check if it has edges that point to other entities (typical of junction tables)
+	edgePattern := regexp.MustCompile(`edge\.To\("[^"]+",\s*[^)]+\)\.Unique\(\)\.Immutable\(\)`)
+	hasJunctionEdges := edgePattern.MatchString(content)
+
+	// Heuristic 3: Check if schema name suggests it's a junction table
+	// Look for patterns like "UserCircle", "BannerTemplateComponent", etc.
+	// Count uppercase letters as they typically indicate word boundaries in camelCase
+	uppercaseCount := 0
+	for _, r := range schemaName {
+		if r >= 'A' && r <= 'Z' {
+			uppercaseCount++
+		}
+	}
+	hasMultipleEntityNames := uppercaseCount >= 2
+
+	// A schema is likely a junction table with .Through() if:
+	// - It has exactly 2 foreign key fields, AND
+	// - It has junction-style edges, AND
+	// - Its name suggests it connects multiple entities
+	return len(fkMatches) == 2 && hasJunctionEdges && hasMultipleEntityNames
 }
 
 // extractCompositeKeyFields extracts field names from composite key field comments
