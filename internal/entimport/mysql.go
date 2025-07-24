@@ -10,6 +10,7 @@ import (
 
 	"entgo.io/contrib/schemast"
 	"entgo.io/ent"
+	"entgo.io/ent/dialect"
 	"entgo.io/ent/schema/field"
 )
 
@@ -115,30 +116,60 @@ func (m *MySQL) convertInteger(typ *schema.IntegerType, name string) (f ent.Fiel
 	if typ.Unsigned {
 		switch typ.T {
 		case mTinyInt:
-			f = field.Uint8(name)
+			f = field.Uint8(name).
+				SchemaType(map[string]string{
+					dialect.MySQL: typ.T + " unsigned",
+				})
 		case mSmallInt:
-			f = field.Uint16(name)
+			f = field.Uint16(name).
+				SchemaType(map[string]string{
+					dialect.MySQL: typ.T + " unsigned",
+				})
 		case mMediumInt:
-			f = field.Uint32(name)
+			f = field.Uint32(name).
+				SchemaType(map[string]string{
+					dialect.MySQL: typ.T + " unsigned",
+				})
 		case mInt:
-			f = field.Uint32(name)
+			f = field.Uint32(name).
+				SchemaType(map[string]string{
+					dialect.MySQL: typ.T + " unsigned",
+				})
 		case mBigInt:
-			f = field.Uint64(name)
+			f = field.Uint64(name).
+				SchemaType(map[string]string{
+					dialect.MySQL: typ.T + " unsigned",
+				})
 		}
 		return f
 	}
 	switch typ.T {
 	case mTinyInt:
-		f = field.Int8(name)
+		f = field.Int8(name).
+			SchemaType(map[string]string{
+				dialect.MySQL: typ.T,
+			})
 	case mSmallInt:
-		f = field.Int16(name)
+		f = field.Int16(name).
+			SchemaType(map[string]string{
+				dialect.MySQL: typ.T,
+			})
 	case mMediumInt:
-		f = field.Int32(name)
+		f = field.Int32(name).
+			SchemaType(map[string]string{
+				dialect.MySQL: typ.T,
+			})
 	case mInt:
-		f = field.Int32(name)
+		f = field.Int32(name).
+			SchemaType(map[string]string{
+				dialect.MySQL: typ.T,
+			})
 	case mBigInt:
 		// Int64 is not used on purpose.
-		f = field.Int(name)
+		f = field.Int(name).
+			SchemaType(map[string]string{
+				dialect.MySQL: typ.T,
+			})
 	}
 	return f
 }

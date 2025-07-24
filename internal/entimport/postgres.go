@@ -131,13 +131,22 @@ func (p *Postgres) convertInteger(typ *schema.IntegerType, name string) (f ent.F
 	switch typ.T {
 	// smallint - 2 bytes small-range integer -32768 to +32767.
 	case "smallint":
-		f = field.Int16(name)
+		f = field.Int16(name).
+			SchemaType(map[string]string{
+				dialect.Postgres: typ.T, // Override Postgres.
+			})
 	// integer - 4 bytes typical choice for integer -2147483648 to +2147483647.
 	case "integer":
-		f = field.Int(name) // Use Int, not Uint32
+		f = field.Int(name).
+			SchemaType(map[string]string{
+				dialect.Postgres: typ.T, // Override Postgres.
+			})
 	// bigint - 8 bytes large-range integer -9223372036854775808 to 9223372036854775807.
 	case "bigint":
-		f = field.Int64(name)
+		f = field.Int64(name).
+			SchemaType(map[string]string{
+				dialect.Postgres: typ.T, // Override Postgres.
+			})
 	}
 	return f
 }
